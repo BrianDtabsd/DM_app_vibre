@@ -1,0 +1,297 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Box,
+  Paper,
+  Typography,
+  IconButton,
+  Button,
+  Checkbox,
+  FormControlLabel,
+  Tooltip,
+  Drawer,
+} from '@mui/material';
+import {
+  Close as CloseIcon,
+  ContentCopy as CopyIcon,
+  Code as CodeIcon,
+  MenuBook as MenuBookIcon,
+} from '@mui/icons-material';
+import { List } from '../types';
+import ListContent from './ListContent';
+import { getSavedBooklets } from '../utils/storage';
+import { BookletManager } from './BookletManager';
+
+interface MultiViewProps {
+  onClose: () => void;
+  onListUpdate: (list: List) => void;
+  onSaveBooklet: (list: List) => void;
+  currentList?: List | null;
+}
+
+export const MultiView: React.FC<MultiViewProps> = ({
+  onClose,
+  onListUpdate,
+  onSaveBooklet,
+  currentList,
+}) => {
+  const [selectedLists, setSelectedLists] = useState<List[]>([]);
+  const [isBookletDrawerOpen, setIsBookletDrawerOpen] = useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  const savedBooklets = React.useMemo(() => {
+    return getSavedBooklets().map(b => b.list);
+  }, []);
+
+  // Initialize with current list if provided
+  useEffect(() => {
+    if (currentList) {
+      setSelectedLists([currentList]);
+    }
+  }, [currentList]);
+
+  // Refresh booklet list when storage changes
+  useEffect(() => {
+    const handleStorageChange = () => {
+      // Refresh selected lists with latest data
+      setSelectedLists(prev => 
+        prev.map(list => {
+          const updated = getSavedBooklets().find(b => b.list.id === list.id)?.list;
+          return updated || list;
+        })
+      );
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  const handleListToggle = (list: List) => {
+    setSelectedLists(prev => {
+      const exists = prev.find(l => l.id === list.id);
+      if (exists) {
+        return prev.filter(l => l.id !== list.id);
+      } else {
+        return [...prev, list];
+      }
+    });
+  };
+
+  const handleSelectAll = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.checked) {
+      setSelectedLists(savedBooklets);
+    } else {
+      setSelectedLists([]);
+    }
+  };
+
+  const handleLoadBooklet = (list: List) => {
+    // If already selected, don't add it again
+    if (!selectedLists.some(l => l.id === list.id)) {
+      setSelectedLists(prev => [...prev, list]);
+    }
+    setIsBookletDrawerOpen(false);
+  };
+
+  const generateExportText = (list: List) => {
+    let text = `Component: ${list.name}\n\n`;
+    
+    if (list.originalText) {
+      text += `Description:\n${list.originalText}\n\n`;
+    }
+    
+    text += 'Fields/Properties:\n';
+    list.items.forEach(item => {
+      text += `\n- ${item.title}`;
+      if (item.content) {
+        text += `\n  ${item.content.split('\n').join('\n  ')}`;
+      }
+      if (item.subItems?.length) {
+        item.subItems.forEach(subItem => {
+          text += `\n  • ${subItem.title}`;
+          if (subItem.content) {
+            text += `\n    ${subItem.content.split('\n').join('\n    ')}`;
+          }
+        });
+      }
+    });
+    
+    return text;
+  };
+
+  const handleCopyToClipboard = async (list: List) => {
+    try {
+      const text = generateExportText(list);
+      await navigator.clipboard.writeText(text);
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error);
+    }
+  };
+
+  return (
+    <Box sx={{ 
+      height: '100%', 
+      display: 'flex', 
+      flexDirection: 'column',
+      p: 2,
+    }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="h5">Component Specifications</Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={selectedLists.length === savedBooklets.length}
+                indeterminate={selectedLists.length > 0 && selectedLists.length < savedBooklets.length}
+                onChange={handleSelectAll}
+              />
+            }
+            label="Select All"
+          />
+        </Box>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            startIcon={<MenuBookIcon />}
+            variant="outlined"
+            size="small"
+            onClick={() => setIsBookletDrawerOpen(true)}
+          >
+            Booklet Manager
+          </Button>
+          <IconButton onClick={onClose} size="small">
+            <CloseIcon />
+          </IconButton>
+        </Box>
+      </Box>
+
+      {/* Selection Area */}
+      <Box sx={{ 
+        display: 'flex', 
+        flexWrap: 'wrap', 
+        gap: 1, 
+        mb: 2,
+        maxHeight: '120px',
+        overflowY: 'auto',
+        p: 1,
+        bgcolor: 'background.paper',
+        borderRadius: 1,
+      }}>
+        {savedBooklets.map((list) => (
+          <FormControlLabel
+            key={list.id}
+            control={
+              <Checkbox
+                checked={selectedLists.some(l => l.id === list.id)}
+                onChange={() => handleListToggle(list)}
+                size="small"
+              />
+            }
+            label={list.name}
+            sx={{ 
+              m: 0,
+              minWidth: '200px',
+              '& .MuiTypography-root': {
+                fontSize: '0.9rem',
+              },
+            }}
+          />
+        ))}
+      </Box>
+
+      {/* Horizontal Scrolling Content Area */}
+      <Box 
+        ref={containerRef}
+        sx={{ 
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'row', // Ensure horizontal layout
+          gap: 2,
+          overflowX: 'auto',
+          overflowY: 'hidden', // Prevent vertical scrolling at this level
+          pb: 2, // Space for scrollbar
+          whiteSpace: 'nowrap', // Keep items in a row
+          '& > *': {
+            flex: '0 0 350px', // Fixed width, no growing or shrinking
+            maxWidth: '350px',
+          }
+        }}
+      >
+        {selectedLists.map((list) => (
+          <Paper 
+            key={list.id}
+            elevation={2}
+            sx={{ 
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <Box sx={{ 
+              p: 1, 
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              bgcolor: 'background.paper',
+              position: 'sticky',
+              top: 0,
+              zIndex: 1,
+            }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
+                {list.name}
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 0.5 }}>
+                <Tooltip title="Copy as text">
+                  <IconButton 
+                    size="small"
+                    onClick={() => handleCopyToClipboard(list)}
+                  >
+                    <CopyIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Save as booklet">
+                  <IconButton 
+                    size="small"
+                    onClick={() => onSaveBooklet(list)}
+                  >
+                    <MenuBookIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            </Box>
+            <Box sx={{ flex: 1, overflowY: 'auto' }}>
+              <ListContent
+                list={list}
+                onUpdate={onListUpdate}
+                onSave={onSaveBooklet}
+                isCompact={true}
+              />
+            </Box>
+          </Paper>
+        ))}
+      </Box>
+
+      {/* Booklet Manager Drawer */}
+      <Drawer
+        anchor="right"
+        open={isBookletDrawerOpen}
+        onClose={() => setIsBookletDrawerOpen(false)}
+        sx={{
+          '& .MuiDrawer-paper': { 
+            width: 320,
+            boxSizing: 'border-box',
+          },
+        }}
+      >
+        <Box sx={{ height: '100%' }}>
+          <BookletManager
+            onLoadBooklet={handleLoadBooklet}
+            currentList={currentList || (selectedLists.length === 1 ? selectedLists[0] : null)}
+            isCompact={false}
+          />
+        </Box>
+      </Drawer>
+    </Box>
+  );
+}; 

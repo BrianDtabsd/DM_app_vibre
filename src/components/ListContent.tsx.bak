@@ -1,0 +1,673 @@
+import React, { useState } from 'react';
+import {
+  Box,
+  Paper,
+  Typography,
+  IconButton,
+  List as MUIList,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
+  Collapse,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Tooltip,
+  Tab,
+  Tabs,
+  Menu,
+  MenuItem,
+} from '@mui/material';
+import {
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  Edit as EditIcon,
+  Save as SaveIcon,
+  ContentCopy as CopyIcon,
+  Code as CodeIcon,
+  UnfoldMore as UnfoldMoreIcon,
+  UnfoldLess as UnfoldLessIcon,
+  Download as DownloadIcon,
+} from '@mui/icons-material';
+import { List, ListItem as ListItemType } from '../types';
+import { BOOKLET_COLORS } from './SavedBooklets';
+import { getSavedBooklets, exportListToFile, EXPORT_FORMATS } from '../utils/storage';
+import { CodeView } from './CodeView';
+
+interface ListContentProps {
+  list: List;
+  onUpdate: (list: List) => void;
+  onSave: (list: List) => void;
+  isCompact?: boolean;
+}
+
+interface EditDialogProps {
+  open: boolean;
+  onClose: () => void;
+  item: ListItemType | null;
+  onSave: (content: string) => void;
+}
+
+const EditDialog = ({ open, onClose, item, onSave }: EditDialogProps) => {
+  const [content, setContent] = useState(item?.content || '');
+
+  React.useEffect(() => {
+    setContent(item?.content || '');
+  }, [item]);
+
+  const handleSubmit = () => {
+    onSave(content);
+    onClose();
+  };
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch (err) {
+      console.error('Failed to copy text:', err);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography>Edit {item?.title}</Typography>
+          {content && (
+            <Tooltip title="Copy text">
+              <IconButton onClick={handleCopy} size="small">
+                <CopyIcon />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+      </DialogTitle>
+      <DialogContent>
+        <TextField
+          fullWidth
+          multiline
+          rows={8}
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          margin="normal"
+          label="Content"
+          placeholder="Enter content here..."
+          InputProps={{
+            sx: { 
+              fontFamily: 'monospace',
+              fontSize: '0.9rem'
+            }
+          }}
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={handleSubmit} variant="contained" color="primary">
+          Save
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+const formatDate = (date: string) => {
+  return new Date(date).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+};
+
+const ListContent: React.FC<ListContentProps> = ({ list, onUpdate, onSave, isCompact = false }) => {
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<ListItemType | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | 'code'>('grid');
+  const [isAllExpanded, setIsAllExpanded] = useState(false);
+  const [exportAnchorEl, setExportAnchorEl] = useState<null | HTMLElement>(null);
+
+  const handleToggleExpand = (itemId: string) => {
+    setExpandedItems(prev => ({
+      ...prev,
+      [itemId]: !prev[itemId],
+    }));
+  };
+
+  const handleToggleExpandAll = () => {
+    const newIsAllExpanded = !isAllExpanded;
+    setIsAllExpanded(newIsAllExpanded);
+    
+    const newExpandedItems: Record<string, boolean> = {};
+    
+    // Toggle main list
+    if (list.originalText) {
+      newExpandedItems['main-list'] = newIsAllExpanded;
+    }
+    
+    // Toggle all items and their sub-items
+    list.items.forEach(item => {
+      // Always expand the main item if it has content or sub-items
+      if (item.content || (item.subItems && item.subItems.length > 0)) {
+        newExpandedItems[item.id] = newIsAllExpanded;
+      }
+      
+      // Expand sub-items if they have content
+      if (item.subItems) {
+        item.subItems.forEach(subItem => {
+          if (subItem.content) {
+            newExpandedItems[subItem.id] = newIsAllExpanded;
+          }
+        });
+      }
+    });
+    
+    setExpandedItems(newExpandedItems);
+  };
+
+  const handleEdit = (item: ListItemType) => {
+    setSelectedItem(item);
+    setEditDialogOpen(true);
+  };
+
+  const handleSaveEdit = (newContent: string) => {
+    if (!selectedItem) return;
+
+    const updateItemContent = (items: ListItemType[]): ListItemType[] => {
+      return items.map(item => {
+        if (item.id === selectedItem.id) {
+          return { ...item, content: newContent };
+        }
+        if (item.subItems) {
+          const updatedSubItems = updateItemContent(item.subItems);
+          if (updatedSubItems !== item.subItems) {
+            return { ...item, subItems: updatedSubItems };
+          }
+        }
+        return item;
+      });
+    };
+
+    onUpdate({
+      ...list,
+      items: updateItemContent(list.items),
+    });
+  };
+
+  const handleCopyOriginalText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (err) {
+      console.error('Failed to copy text:', err);
+    }
+  };
+
+  // Get the color for this list based on its position in the saved booklets
+  const listColor = React.useMemo(() => {
+    const booklets = getSavedBooklets();
+    const index = booklets.findIndex(b => b.list.id === list.id);
+    return BOOKLET_COLORS[Math.max(0, index) % BOOKLET_COLORS.length];
+  }, [list.id]);
+
+  const OriginalTextDisplay = ({ text, title }: { text: string, title?: string }) => (
+    <Paper 
+      elevation={1} 
+      sx={{ 
+        p: isCompact ? 1 : 2, 
+        mb: isCompact ? 1 : 3, 
+        bgcolor: 'background.default',
+        position: 'relative',
+        maxWidth: isCompact ? '300px' : 'none',
+      }}
+    >
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+        <Typography 
+          variant={isCompact ? "body1" : "subtitle1"} 
+          sx={{ 
+            color: listColor, 
+            fontWeight: 500,
+            fontSize: isCompact ? '0.9rem' : 'inherit',
+          }}
+        >
+          {title || 'Original Text'}
+        </Typography>
+        <Tooltip title="Copy original text">
+          <IconButton
+            size="small"
+            onClick={() => handleCopyOriginalText(text)}
+            sx={{ color: listColor }}
+          >
+            <CopyIcon />
+          </IconButton>
+        </Tooltip>
+      </Box>
+      <Typography
+        component="pre"
+        sx={{
+          whiteSpace: 'pre-wrap',
+          fontFamily: 'monospace',
+          fontSize: isCompact ? '0.8rem' : '0.9rem',
+          bgcolor: 'background.paper',
+          p: isCompact ? 1 : 2,
+          borderRadius: 1,
+          border: '1px solid',
+          borderColor: 'divider',
+          maxHeight: isCompact ? '150px' : 'none',
+          overflowY: 'auto',
+        }}
+      >
+        {text}
+      </Typography>
+    </Paper>
+  );
+
+  const generateCodeView = () => {
+    let code = `// ${list.name}\n`;
+    if (list.originalText) {
+      code += `/*\n${list.originalText}\n*/\n\n`;
+    }
+
+    list.items.forEach(item => {
+      code += `// ${item.title}\n`;
+      if (item.content) {
+        code += `/*\n${item.content}\n*/\n`;
+      }
+      
+      if (item.subItems?.length) {
+        item.subItems.forEach(subItem => {
+          code += `  // ${subItem.title}\n`;
+          if (subItem.content) {
+            code += `  /*\n  ${subItem.content.split('\n').join('\n  ')}\n  */\n`;
+          }
+        });
+      }
+      code += '\n';
+    });
+
+    return code;
+  };
+
+  const handleCopyCode = async () => {
+    try {
+      const codeElement = document.querySelector('code');
+      if (codeElement) {
+        await navigator.clipboard.writeText(codeElement.textContent || '');
+      }
+    } catch (err) {
+      console.error('Failed to copy code:', err);
+    }
+  };
+
+  const handleDownload = () => {
+    try {
+      const codeElement = document.querySelector('code');
+      if (codeElement) {
+        exportListToFile(list, 'typescript');
+      }
+    } catch (err) {
+      console.error('Failed to download:', err);
+    }
+  };
+
+  const handleExportAll = async () => {
+    try {
+      Object.keys(EXPORT_FORMATS).forEach(format => {
+        exportListToFile(list, format);
+      });
+    } catch (err) {
+      console.error('Failed to export all formats:', err);
+    }
+  };
+
+  const handleExportClick = (event: React.MouseEvent<HTMLElement>) => {
+    setExportAnchorEl(event.currentTarget);
+  };
+
+  const handleExportClose = () => {
+    setExportAnchorEl(null);
+  };
+
+  const handleExportFormat = (format: string) => {
+    try {
+      exportListToFile(list, format);
+    } catch (error) {
+      console.error('Export failed:', error);
+    }
+    handleExportClose();
+  };
+
+  return (
+    <Paper 
+      elevation={2} 
+      sx={{ 
+        p: isCompact ? 1 : 2,
+        borderTop: `4px solid ${listColor}`,
+      }}
+    >
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Box sx={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 2,
+          minWidth: 0,
+          flex: '1 1 auto'
+        }}>
+          <Typography 
+            variant="h6" 
+            sx={{ 
+              color: listColor,
+              fontWeight: 500,
+              cursor: list.originalText ? 'pointer' : 'default',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              maxWidth: '200px'
+            }}
+            onClick={() => {
+              if (list.originalText) {
+                handleToggleExpand('main-list');
+              }
+            }}
+          >
+            {list.name}
+          </Typography>
+          <Tabs 
+            value={viewMode} 
+            onChange={(_, newValue) => setViewMode(newValue)}
+            sx={{
+              minHeight: 36,
+              '& .MuiTab-root': {
+                minHeight: 36,
+                py: 0.5,
+              },
+            }}
+          >
+            <Tab label="Grid View" value="grid" />
+            <Tab label="Code View" value="code" />
+          </Tabs>
+        </Box>
+        <Box sx={{ 
+          display: 'flex', 
+          gap: 1, 
+          alignItems: 'center',
+          ml: 2,
+          flex: '0 0 auto'
+        }}>
+          {viewMode === 'grid' && (
+            <Tooltip title={isAllExpanded ? "Collapse all" : "Expand all"}>
+              <IconButton
+                size="small"
+                onClick={handleToggleExpandAll}
+                sx={{ color: listColor }}
+              >
+                {isAllExpanded ? (
+                  <UnfoldLessIcon />
+                ) : (
+                  <UnfoldMoreIcon />
+                )}
+              </IconButton>
+            </Tooltip>
+          )}
+          {viewMode === 'code' && (
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Tooltip title="Copy code">
+                <IconButton
+                  size="small"
+                  onClick={handleCopyCode}
+                  sx={{ color: listColor }}
+                >
+                  <CopyIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Download current format">
+                <IconButton
+                  size="small"
+                  onClick={handleDownload}
+                  sx={{ color: listColor }}
+                >
+                  <DownloadIcon />
+                </IconButton>
+              </Tooltip>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleExportAll}
+                startIcon={<CodeIcon />}
+                sx={{ 
+                  color: listColor,
+                  borderColor: listColor,
+                  '&:hover': {
+                    borderColor: listColor,
+                    bgcolor: `${listColor}10`,
+                  },
+                }}
+              >
+                Export All Formats
+              </Button>
+            </Box>
+          )}
+          {list.originalText && viewMode === 'grid' && (
+            <IconButton
+              size="small"
+              onClick={() => handleToggleExpand('main-list')}
+              sx={{ color: listColor }}
+            >
+              {expandedItems['main-list'] ? (
+                <ExpandLessIcon />
+              ) : (
+                <ExpandMoreIcon />
+              )}
+            </IconButton>
+          )}
+          <Button
+            startIcon={<SaveIcon />}
+            variant="contained"
+            onClick={() => onSave(list)}
+            sx={{ 
+              bgcolor: listColor,
+              '&:hover': {
+                bgcolor: listColor,
+                filter: 'brightness(0.9)',
+              },
+            }}
+          >
+            Save Changes
+          </Button>
+        </Box>
+      </Box>
+
+      {list.originalText && viewMode === 'grid' && (
+        <Collapse in={expandedItems['main-list']} timeout="auto">
+          <Box sx={{ mb: 3 }}>
+            <OriginalTextDisplay text={list.originalText} title={`Original ${list.name} Text`} />
+          </Box>
+        </Collapse>
+      )}
+
+      {viewMode === 'code' ? (
+        <CodeView list={list} color={listColor} />
+      ) : (
+        <Box sx={{ 
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+          gap: 2,
+          width: '100%',
+        }}>
+          {list.items.map((item) => (
+            <Paper
+              key={item.id}
+              elevation={1}
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                borderRadius: 1,
+                overflow: 'hidden',
+                border: '1px solid',
+                borderColor: 'divider',
+              }}
+            >
+              {/* Item Header */}
+              <Box sx={{
+                p: 1.5,
+                borderBottom: '1px solid',
+                borderColor: 'divider',
+                bgcolor: 'background.paper',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}>
+                <Typography
+                  variant="subtitle1"
+                  sx={{
+                    color: listColor,
+                    fontWeight: 'medium',
+                    flex: 1,
+                  }}
+                >
+                  {item.title}
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 0.5 }}>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEdit(item);
+                    }}
+                    sx={{ color: listColor }}
+                  >
+                    <EditIcon />
+                  </IconButton>
+                  {(item.subItems?.length || item.content) && (
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleExpand(item.id);
+                      }}
+                      sx={{ color: listColor }}
+                    >
+                      {expandedItems[item.id] ? (
+                        <ExpandLessIcon />
+                      ) : (
+                        <ExpandMoreIcon />
+                      )}
+                    </IconButton>
+                  )}
+                </Box>
+              </Box>
+
+              {/* Item Content */}
+              <Collapse in={expandedItems[item.id]} timeout="auto">
+                <Box sx={{ p: 1.5 }}>
+                  {item.content && (
+                    <OriginalTextDisplay 
+                      text={item.content} 
+                      title={`Original ${item.title} Text`}
+                    />
+                  )}
+
+                  {item.subItems && item.subItems.length > 0 && (
+                    <Box sx={{ mt: item.content ? 2 : 0 }}>
+                      <Typography 
+                        variant="subtitle2" 
+                        sx={{ 
+                          color: listColor,
+                          mb: 1,
+                          fontWeight: 'medium',
+                        }}
+                      >
+                        Sub-Items:
+                      </Typography>
+                      <Box sx={{ 
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                        gap: 1,
+                      }}>
+                        {item.subItems.map((subItem) => (
+                          <Paper
+                            key={subItem.id}
+                            elevation={0}
+                            sx={{
+                              p: 1,
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 1,
+                              bgcolor: 'background.default',
+                            }}
+                          >
+                            <Box sx={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              mb: subItem.content ? 1 : 0,
+                            }}>
+                              <Typography variant="body2">
+                                {subItem.title}
+                              </Typography>
+                              <Box sx={{ display: 'flex', gap: 0.5 }}>
+                                <IconButton
+                                  size="small"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleEdit(subItem);
+                                  }}
+                                  sx={{ color: listColor }}
+                                >
+                                  <EditIcon />
+                                </IconButton>
+                                {subItem.content && (
+                                  <IconButton
+                                    size="small"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleToggleExpand(subItem.id);
+                                    }}
+                                    sx={{ color: listColor }}
+                                  >
+                                    {expandedItems[subItem.id] ? (
+                                      <ExpandLessIcon />
+                                    ) : (
+                                      <ExpandMoreIcon />
+                                    )}
+                                  </IconButton>
+                                )}
+                              </Box>
+                            </Box>
+                            <Collapse in={expandedItems[subItem.id]} timeout="auto">
+                              {subItem.content && (
+                                <Box sx={{ mt: 1 }}>
+                                  <OriginalTextDisplay 
+                                    text={subItem.content} 
+                                    title={`Original ${subItem.title} Text`}
+                                  />
+                                </Box>
+                              )}
+                            </Collapse>
+                          </Paper>
+                        ))}
+                      </Box>
+                    </Box>
+                  )}
+                </Box>
+              </Collapse>
+            </Paper>
+          ))}
+        </Box>
+      )}
+
+      <EditDialog
+        open={editDialogOpen}
+        onClose={() => {
+          setEditDialogOpen(false);
+          setSelectedItem(null);
+        }}
+        item={selectedItem}
+        onSave={handleSaveEdit}
+      />
+    </Paper>
+  );
+};
+
+export default ListContent; 

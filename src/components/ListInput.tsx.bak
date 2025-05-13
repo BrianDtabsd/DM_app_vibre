@@ -1,0 +1,107 @@
+import React, { useState, useRef } from 'react';
+import { TextField, Button, Box, Typography, Alert, Tooltip } from '@mui/material';
+import { List } from '../types';
+import { importListFromFile } from '../utils/storage';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+
+interface ListInputProps {
+  onListCreate: (list: List) => void;
+}
+
+export const ListInput: React.FC<ListInputProps> = ({ onListCreate }) => {
+  const [error, setError] = useState<string | null>(null);
+  const textFieldRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleImport = async () => {
+    try {
+      const list = await importListFromFile();
+      onListCreate(list);
+      setError(null);
+    } catch (err) {
+      if (err.message !== 'Import cancelled') {
+        setError(err.message);
+      }
+    }
+  };
+
+  const handleSubmit = () => {
+    const text = textFieldRef.current?.value;
+    if (!text) return;
+
+    const lines = text.split('\n').filter(line => line.trim());
+    if (lines.length === 0) return;
+
+    const list: List = {
+      id: Date.now().toString(),
+      name: lines[0],
+      items: lines.slice(1).map(line => ({
+        id: crypto.randomUUID(),
+        title: line.trim(),
+        content: '',
+      })),
+      createdAt: new Date().toISOString(),
+      originalText: text,
+    };
+
+    onListCreate(list);
+    if (textFieldRef.current) {
+      textFieldRef.current.value = '';
+    }
+  };
+
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 1,
+      }}
+    >
+      <Box
+        sx={{
+          display: 'flex',
+          gap: 2,
+          alignItems: 'flex-start',
+        }}
+      >
+        <TextField
+          multiline
+          rows={4}
+          placeholder="Enter list items (one per line)..."
+          fullWidth
+          inputRef={textFieldRef}
+          sx={{
+            '& .MuiOutlinedInput-root': {
+              backgroundColor: 'background.paper',
+            },
+          }}
+        />
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Button
+            variant="contained"
+            onClick={handleSubmit}
+            sx={{ minWidth: '120px' }}
+          >
+            Create List
+          </Button>
+          <Tooltip title="Import list from a file">
+            <Button
+              variant="outlined"
+              onClick={handleImport}
+              startIcon={<UploadFileIcon />}
+              sx={{ minWidth: '120px' }}
+            >
+              Import
+            </Button>
+          </Tooltip>
+        </Box>
+      </Box>
+
+      {error && (
+        <Alert severity="error" onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+    </Box>
+  );
+}; 

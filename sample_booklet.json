@@ -1,0 +1,42 @@
+{
+  "id": "ee-profile-123",
+  "name": "EE Profile",
+  "createdAt": "2024-01-17T12:00:00.000Z",
+  "originalText": "Experience\nSkills\nEducation\nCertifications",
+  "items": [
+    {
+      "id": "experience-123",
+      "title": "Experience",
+      "content": "Professional experience section",
+      "subItems": [
+        {
+          "id": "exp-1",
+          "title": "Senior Engineer",
+          "content": "Led development team on critical projects"
+        },
+        {
+          "id": "exp-2",
+          "title": "Software Engineer",
+          "content": "Developed core platform features"
+        }
+      ]
+    },
+    {
+      "id": "skills-123",
+      "title": "Skills",
+      "content": "Technical skills and competencies",
+      "subItems": [
+        {
+          "id": "skill-1",
+          "title": "Programming Languages",
+          "content": "Python, JavaScript, Java"
+        },
+        {
+          "id": "skill-2",
+          "title": "Frameworks",
+          "content": "React, Node.js, Django"
+        }
+      ]
+    }
+  ]
+} 

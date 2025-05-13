@@ -1,0 +1,902 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Box,
+  List,
+  ListItem,
+  ListItemText,
+  IconButton,
+  Typography,
+  Paper,
+  Tooltip,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Menu,
+  MenuItem,
+  Divider,
+  Stack,
+  FormControl,
+  InputLabel,
+  Select,
+  Checkbox,
+  FormControlLabel,
+  SelectChangeEvent,
+} from '@mui/material';
+import {
+  Delete as DeleteIcon,
+  Edit as EditIcon,
+  MoreVert as MoreVertIcon,
+  Add as AddIcon,
+  Upload as UploadIcon,
+  Download as DownloadIcon,
+  Save as SaveIcon,
+  ContentCopy as DuplicateIcon,
+  Archive as ArchiveIcon,
+  Help as HelpIcon,
+} from '@mui/icons-material';
+import { List as ListType } from '../types';
+import { 
+  SavedBooklet, 
+  getSavedBooklets, 
+  saveBooklet, 
+  deleteBooklet, 
+  exportListToFile,
+  importListFromFile,
+  exportMultipleListsToZip,
+  EXPORT_FORMATS,
+} from '../utils/storage';
+import { getTimeAgo } from '../utils/date';
+import { BOOKLET_COLORS } from './SavedBooklets';
+
+interface BookletManagerProps {
+  onLoadBooklet: (list: ListType) => void;
+  currentList: ListType | null;
+  isCompact?: boolean;
+}
+
+export const BookletManager = ({ onLoadBooklet, currentList, isCompact = false }: BookletManagerProps) => {
+  const [booklets, setBooklets] = useState<SavedBooklet[]>([]);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [selectedBooklet, setSelectedBooklet] = useState<SavedBooklet | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
+  const [newBookletName, setNewBookletName] = useState('');
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [batchExportDialogOpen, setBatchExportDialogOpen] = useState(false);
+  const [selectedFormat, setSelectedFormat] = useState<string>('json');
+  const [selectedBookletsForExport, setSelectedBookletsForExport] = useState<string[]>([]);
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [mostRecentBookletId, setMostRecentBookletId] = useState<string | null>(null);
+
+  // Load booklets on mount and when storage changes
+  useEffect(() => {
+    const loadBooklets = () => {
+      const savedBooklets = getSavedBooklets();
+      setBooklets(savedBooklets);
+      
+      // Get most recent booklet ID from localStorage
+      const recentId = localStorage.getItem('mostRecentBookletId');
+      if (recentId) {
+        setMostRecentBookletId(recentId);
+      } else if (savedBooklets.length > 0) {
+        // If no recent booklet is stored, use the first one
+        setMostRecentBookletId(savedBooklets[0].id);
+      }
+    };
+
+    loadBooklets();
+    window.addEventListener('storage', loadBooklets);
+    return () => window.removeEventListener('storage', loadBooklets);
+  }, []);
+
+  // Set most recent booklet ID in localStorage
+  useEffect(() => {
+    if (mostRecentBookletId) {
+      localStorage.setItem('mostRecentBookletId', mostRecentBookletId);
+    }
+  }, [mostRecentBookletId]);
+
+  // Show temporary feedback message
+  const showFeedback = (message: string) => {
+    setActionFeedback(message);
+    setTimeout(() => setActionFeedback(null), 2000);
+  };
+
+  // Load booklet handler with clear feedback
+  const handleBookletLoad = (booklet: SavedBooklet) => {
+    try {
+      onLoadBooklet(booklet.list);
+      setMostRecentBookletId(booklet.id);
+      showFeedback(`Loaded: ${booklet.name}`);
+    } catch (error) {
+      console.error('Error loading booklet:', error);
+      showFeedback('Error loading booklet');
+    }
+  };
+
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>, booklet: SavedBooklet) => {
+    event.stopPropagation();
+    setSelectedBooklet(booklet);
+    setMenuAnchor(event.currentTarget);
+  };
+
+  const handleMenuClose = () => {
+    setMenuAnchor(null);
+  };
+
+  const handleEditClick = () => {
+    if (selectedBooklet) {
+      setNewBookletName(selectedBooklet.name);
+      setEditDialogOpen(true);
+    }
+    handleMenuClose();
+  };
+
+  const handleDeleteClick = () => {
+    if (selectedBooklet) {
+      deleteBooklet(selectedBooklet.id);
+      setBooklets(getSavedBooklets());
+      showFeedback(`Deleted: ${selectedBooklet.name}`);
+    }
+    handleMenuClose();
+  };
+
+  const handleEditSave = () => {
+    if (selectedBooklet && newBookletName.trim()) {
+      const updatedBooklet: SavedBooklet = {
+        ...selectedBooklet,
+        name: newBookletName.trim(),
+      };
+      saveBooklet(updatedBooklet.list);
+      setBooklets(getSavedBooklets());
+      setEditDialogOpen(false);
+      showFeedback(`Renamed to: ${newBookletName.trim()}`);
+    }
+  };
+
+  const handleAddBooklet = () => {
+    if (newBookletName.trim()) {
+      const newList: ListType = {
+        id: Date.now().toString(),
+        name: newBookletName.trim(),
+        items: [],
+        createdAt: new Date().toISOString(),
+      };
+      saveBooklet(newList);
+      setBooklets(getSavedBooklets());
+      setAddDialogOpen(false);
+      setNewBookletName('');
+      showFeedback(`Created: ${newBookletName.trim()}`);
+    }
+  };
+
+  const handleExportBooklet = () => {
+    if (selectedBooklet) {
+      exportListToFile(selectedBooklet.list, 'json');
+      showFeedback(`Exporting: ${selectedBooklet.name}`);
+    }
+    handleMenuClose();
+  };
+
+  const handleDuplicateBooklet = () => {
+    if (selectedBooklet) {
+      const duplicatedList: ListType = {
+        ...selectedBooklet.list,
+        id: Date.now().toString(),
+        name: `${selectedBooklet.name} (Copy)`,
+      };
+      saveBooklet(duplicatedList);
+      setBooklets(getSavedBooklets());
+      showFeedback(`Duplicated: ${selectedBooklet.name}`);
+    }
+    handleMenuClose();
+  };
+
+  const handleImportBooklet = async () => {
+    try {
+      const list = await importListFromFile();
+      onLoadBooklet(list);
+      setImportDialogOpen(false);
+      setImportError(null);
+      showFeedback(`Imported: ${list.name}`);
+    } catch (err) {
+      if (err.message !== 'Import cancelled') {
+        setImportError(err.message);
+      }
+    }
+  };
+
+  const handleSaveCurrentList = () => {
+    if (currentList) {
+      saveBooklet(currentList);
+      const updatedBooklets = getSavedBooklets();
+      setBooklets(updatedBooklets);
+      
+      // Find the newly saved booklet and set it as most recent
+      const savedBooklet = updatedBooklets.find(b => b.list.id === currentList.id);
+      if (savedBooklet) {
+        setMostRecentBookletId(savedBooklet.id);
+      }
+      
+      showFeedback(`Saved: ${currentList.name}`);
+    }
+  };
+
+  const handleExportCurrentList = () => {
+    if (currentList) {
+      exportListToFile(currentList, 'json');
+      showFeedback(`Exporting: ${currentList.name}`);
+    }
+  };
+
+  const handleFormatChange = (event: SelectChangeEvent<string>) => {
+    setSelectedFormat(event.target.value);
+  };
+
+  const handleToggleBookletForExport = (bookletId: string) => {
+    setSelectedBookletsForExport(prev => {
+      if (prev.includes(bookletId)) {
+        return prev.filter(id => id !== bookletId);
+      } else {
+        return [...prev, bookletId];
+      }
+    });
+  };
+
+  const handleSelectAllBookletsForExport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.checked) {
+      setSelectedBookletsForExport(booklets.map(b => b.id));
+    } else {
+      setSelectedBookletsForExport([]);
+    }
+  };
+
+  const handleBatchExport = async () => {
+    const selectedBookletsData = booklets
+      .filter(b => selectedBookletsForExport.includes(b.id))
+      .map(b => b.list);
+    
+    if (selectedBookletsData.length > 0) {
+      try {
+        await exportMultipleListsToZip(selectedBookletsData, selectedFormat);
+        setBatchExportDialogOpen(false);
+        setSelectedBookletsForExport([]);
+      } catch (error) {
+        console.error('Batch export failed:', error);
+      }
+    }
+  };
+
+  // Render bookmark list - shared between compact and full views
+  const renderBookletList = (compact: boolean) => {
+    if (booklets.length === 0) {
+      return (
+        <Box sx={{ p: compact ? 1 : 2, textAlign: 'center' }}>
+          <Typography 
+            variant="body2" 
+            color="text.secondary" 
+            sx={compact ? { fontSize: '0.75rem' } : undefined}
+          >
+            No saved booklets yet
+          </Typography>
+          {!compact && (
+            <Button
+              startIcon={<AddIcon />}
+              onClick={() => setAddDialogOpen(true)}
+              size="small"
+              sx={{ mt: 1 }}
+            >
+              Add Booklet
+            </Button>
+          )}
+        </Box>
+      );
+    }
+
+    return (
+      <List dense sx={{ py: 0 }}>
+        {booklets.map((booklet, index) => {
+          const isRecent = booklet.id === mostRecentBookletId;
+          
+          if (compact) {
+            return (
+              <ListItem
+                key={booklet.id}
+                disablePadding
+                sx={{
+                  mb: 0.5,
+                  borderRadius: 1,
+                  backgroundColor: isRecent ? 'rgba(25, 118, 210, 0.08)' : 'transparent',
+                  '&:hover': {
+                    backgroundColor: isRecent ? 'rgba(25, 118, 210, 0.12)' : 'action.hover',
+                  },
+                }}
+              >
+                <Button
+                  onClick={() => handleBookletLoad(booklet)}
+                  sx={{
+                    textAlign: 'left',
+                    width: '100%',
+                    p: '2px 8px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    color: 'text.primary',
+                    fontWeight: isRecent ? 'medium' : 'normal',
+                    textTransform: 'none',
+                  }}
+                >
+                  <Typography
+                    noWrap
+                    sx={{
+                      fontSize: '0.75rem',
+                      fontWeight: isRecent ? 'medium' : 'normal',
+                      color: isRecent ? BOOKLET_COLORS[index % BOOKLET_COLORS.length] : 'inherit',
+                      minWidth: 0,
+                      flexGrow: 1,
+                    }}
+                  >
+                    {booklet.name}
+                  </Typography>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => handleMenuOpen(e, booklet)}
+                    sx={{ 
+                      padding: 0, 
+                      marginLeft: 'auto',
+                      visibility: 'hidden',
+                      '.MuiListItem-root:hover &': {
+                        visibility: 'visible',
+                      },
+                    }}
+                  >
+                    <MoreVertIcon sx={{ fontSize: '0.875rem' }} />
+                  </IconButton>
+                </Button>
+              </ListItem>
+            );
+          } else {
+            return (
+              <ListItem
+                key={booklet.id}
+                sx={{
+                  borderLeft: `4px solid ${BOOKLET_COLORS[index % BOOKLET_COLORS.length]}`,
+                  borderBottom: '1px solid',
+                  borderColor: 'divider',
+                  backgroundColor: isRecent ? 'rgba(25, 118, 210, 0.08)' : 'transparent',
+                  '&:hover': {
+                    backgroundColor: isRecent ? 'rgba(25, 118, 210, 0.12)' : 'action.hover',
+                  },
+                  py: 1,
+                  px: 1.5,
+                }}
+              >
+                <Button
+                  onClick={() => handleBookletLoad(booklet)}
+                  sx={{
+                    textAlign: 'left',
+                    justifyContent: 'flex-start',
+                    p: 0,
+                    textTransform: 'none',
+                    display: 'block',
+                    width: '100%',
+                    color: 'text.primary',
+                  }}
+                >
+                  <ListItemText
+                    primary={booklet.name}
+                    secondary={getTimeAgo(booklet.savedAt)}
+                    primaryTypographyProps={{
+                      variant: 'subtitle2',
+                      sx: {
+                        fontWeight: isRecent ? 600 : 500,
+                        color: BOOKLET_COLORS[index % BOOKLET_COLORS.length],
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      },
+                    }}
+                    secondaryTypographyProps={{
+                      variant: 'caption',
+                    }}
+                    sx={{ cursor: 'pointer' }}
+                  />
+                </Button>
+                <IconButton
+                  size="small"
+                  onClick={(e) => handleMenuOpen(e, booklet)}
+                >
+                  <MoreVertIcon fontSize="small" />
+                </IconButton>
+              </ListItem>
+            );
+          }
+        })}
+      </List>
+    );
+  };
+
+  // Render a compact view for the sidebar
+  const renderCompactView = () => (
+    <Box 
+      sx={{ 
+        height: '100%', 
+        display: 'flex', 
+        flexDirection: 'column',
+        overflow: 'hidden',
+        position: 'relative',
+        pt: 1,
+      }}
+    >
+      {actionFeedback && (
+        <Box sx={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          bgcolor: 'primary.main',
+          color: 'white',
+          py: 0.75,
+          px: 1.5,
+          borderRadius: 1,
+          zIndex: 10,
+          boxShadow: 2,
+          fontSize: '0.75rem',
+        }}>
+          {actionFeedback}
+        </Box>
+      )}
+
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        px: 1.5,
+        pb: 1,
+      }}>
+        <Typography variant="subtitle2" sx={{ fontSize: '0.75rem' }}>
+          Booklets
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 0.5 }}>
+          <Tooltip title="Import booklet">
+            <IconButton
+              size="small"
+              onClick={() => setImportDialogOpen(true)}
+              sx={{ padding: 0.5 }}
+            >
+              <UploadIcon sx={{ fontSize: '1rem' }} />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Add new booklet">
+            <IconButton
+              size="small"
+              onClick={() => setAddDialogOpen(true)}
+              sx={{ padding: 0.5 }}
+            >
+              <AddIcon sx={{ fontSize: '1rem' }} />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </Box>
+      
+      {/* Current list section */}
+      {currentList && (
+        <Box sx={{ 
+          px: 1.5,
+          pb: 1,
+          mb: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 0.5,
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+        }}>
+          <Typography 
+            variant="subtitle2" 
+            sx={{ 
+              fontSize: '0.7rem', 
+              mb: 0.5,
+              color: 'text.secondary',
+              fontWeight: 'normal',
+            }}
+          >
+            Current Working List:
+          </Typography>
+          <Box sx={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            backgroundColor: 'rgba(25, 118, 210, 0.08)',
+            p: '4px 8px',
+            borderRadius: 1,
+          }}>
+            <Typography 
+              noWrap
+              sx={{ 
+                fontSize: '0.75rem',
+                fontWeight: 'medium',
+                color: 'primary.main',
+                flexGrow: 1,
+              }}
+            >
+              {currentList.name}
+            </Typography>
+          </Box>
+          <Button 
+            size="small" 
+            variant="contained" 
+            startIcon={<SaveIcon sx={{ fontSize: '0.875rem' }} />}
+            onClick={handleSaveCurrentList}
+            sx={{ 
+              py: 0.5, 
+              fontSize: '0.75rem',
+              textTransform: 'none',
+              mt: 0.5,
+            }}
+          >
+            Save as Booklet
+          </Button>
+        </Box>
+      )}
+    
+      {/* Saved booklets section */}
+      <Typography 
+        variant="subtitle2" 
+        sx={{ 
+          px: 1.5, 
+          fontSize: '0.7rem', 
+          mb: 0.5,
+          color: 'text.secondary',
+          fontWeight: 'normal',
+        }}
+      >
+        Saved Booklets:
+      </Typography>
+      <Box sx={{ 
+        flex: 1, 
+        overflowY: 'auto',
+        px: 0.5,
+      }}>
+        {renderBookletList(true)}
+      </Box>
+    </Box>
+  );
+
+  // Render a full-featured view for the main page
+  const renderFullView = () => (
+    <Paper 
+      elevation={1} 
+      sx={{ 
+        height: '100%', 
+        display: 'flex', 
+        flexDirection: 'column',
+        overflow: 'hidden',
+        position: 'relative',
+      }}
+    >
+      {actionFeedback && (
+        <Box sx={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          bgcolor: 'primary.main',
+          color: 'white',
+          py: 1,
+          px: 2,
+          borderRadius: 1,
+          zIndex: 10,
+          boxShadow: 3,
+          animation: 'fadeIn 0.3s ease-out',
+          '@keyframes fadeIn': {
+            from: { opacity: 0 },
+            to: { opacity: 1 }
+          }
+        }}>
+          {actionFeedback}
+        </Box>
+      )}
+
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        p: 2,
+        borderBottom: '1px solid',
+        borderColor: 'divider',
+        backgroundColor: 'background.paper',
+      }}>
+        <Typography variant="h6">
+          Booklet Manager
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Tooltip title="Batch export booklets">
+            <IconButton
+              size="small"
+              onClick={() => setBatchExportDialogOpen(true)}
+            >
+              <ArchiveIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Import booklet">
+            <IconButton
+              size="small"
+              onClick={() => setImportDialogOpen(true)}
+            >
+              <UploadIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Add new booklet">
+            <IconButton
+              size="small"
+              onClick={() => setAddDialogOpen(true)}
+            >
+              <AddIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </Box>
+
+      {currentList && (
+        <Box sx={{ 
+          p: 2, 
+          borderBottom: '1px solid', 
+          borderColor: 'divider',
+          backgroundColor: '#f5f5f5'
+        }}>
+          <Typography variant="subtitle2" gutterBottom>
+            Current Working List
+          </Typography>
+          <Typography variant="body2" fontWeight="medium" mb={1.5}>
+            {currentList.name}
+          </Typography>
+          <Stack direction="row" spacing={1}>
+            <Button 
+              size="small" 
+              variant="contained" 
+              startIcon={<SaveIcon />}
+              onClick={handleSaveCurrentList}
+            >
+              Save as Booklet
+            </Button>
+            <Button 
+              size="small" 
+              variant="outlined" 
+              startIcon={<DownloadIcon />}
+              onClick={handleExportCurrentList}
+            >
+              Export File
+            </Button>
+          </Stack>
+        </Box>
+      )}
+
+      <Typography 
+        variant="subtitle2" 
+        color="text.secondary" 
+        sx={{ px: 2, py: 1.5 }}
+      >
+        Saved Booklets
+      </Typography>
+      
+      <Box sx={{ 
+        flex: 1, 
+        overflowY: 'auto',
+        borderTop: '1px solid',
+        borderColor: 'divider',
+      }}>
+        {renderBookletList(false)}
+      </Box>
+    </Paper>
+  );
+
+  // Dialogs and Menus
+  const renderDialogs = () => (
+    <>
+      <Menu
+        anchorEl={menuAnchor}
+        open={Boolean(menuAnchor)}
+        onClose={handleMenuClose}
+      >
+        <MenuItem onClick={() => {
+          if (selectedBooklet) handleBookletLoad(selectedBooklet);
+          handleMenuClose();
+        }}>
+          <SaveIcon fontSize="small" sx={{ mr: 1 }} />
+          Load Booklet
+        </MenuItem>
+        <MenuItem onClick={handleEditClick}>
+          <EditIcon fontSize="small" sx={{ mr: 1 }} />
+          Rename
+        </MenuItem>
+        <MenuItem onClick={handleDuplicateBooklet}>
+          <DuplicateIcon fontSize="small" sx={{ mr: 1 }} />
+          Duplicate
+        </MenuItem>
+        <MenuItem onClick={handleExportBooklet}>
+          <DownloadIcon fontSize="small" sx={{ mr: 1 }} />
+          Export
+        </MenuItem>
+        <Divider />
+        <MenuItem onClick={handleDeleteClick} sx={{ color: 'error.main' }}>
+          <DeleteIcon fontSize="small" sx={{ mr: 1 }} />
+          Delete
+        </MenuItem>
+      </Menu>
+
+      <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)}>
+        <DialogTitle>Rename Booklet</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Booklet Name"
+            fullWidth
+            value={newBookletName}
+            onChange={(e) => setNewBookletName(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleEditSave} variant="contained" disabled={!newBookletName.trim()}>
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={addDialogOpen} onClose={() => setAddDialogOpen(false)}>
+        <DialogTitle>Add New Booklet</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Create an empty booklet to fill in later. Name it after the component you're planning to build.
+          </Typography>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Booklet Name"
+            placeholder="e.g., LoginForm, UserProfile, Dashboard"
+            fullWidth
+            value={newBookletName}
+            onChange={(e) => setNewBookletName(e.target.value)}
+            helperText="Start with a clear name - you can add details later"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleAddBooklet} variant="contained" disabled={!newBookletName.trim()}>
+            Create Empty Booklet
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={importDialogOpen} onClose={() => {
+        setImportDialogOpen(false);
+        setImportError(null);
+      }}>
+        <DialogTitle>Import Booklet</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Load a previously exported booklet file (.json format). This will add it to your booklet collection and make it available for editing.
+          </Typography>
+          {importError && (
+            <Typography color="error" variant="body2" sx={{ mb: 2 }}>
+              Error: {importError}
+            </Typography>
+          )}
+          <Button
+            variant="outlined"
+            startIcon={<UploadIcon />}
+            onClick={handleImportBooklet}
+            fullWidth
+          >
+            Choose Booklet File
+          </Button>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setImportDialogOpen(false);
+            setImportError(null);
+          }}>
+            Cancel
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog 
+        open={batchExportDialogOpen} 
+        onClose={() => setBatchExportDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Batch Export Booklets</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mb: 3, mt: 1 }}>
+            <FormControl fullWidth>
+              <InputLabel>Export Format</InputLabel>
+              <Select
+                value={selectedFormat}
+                label="Export Format"
+                onChange={handleFormatChange}
+              >
+                {Object.entries(EXPORT_FORMATS).map(([key, { extension }]) => (
+                  <MenuItem key={key} value={key}>
+                    {key.toUpperCase()} ({extension})
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+
+          <Box sx={{ mb: 2 }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={selectedBookletsForExport.length === booklets.length}
+                  indeterminate={selectedBookletsForExport.length > 0 && selectedBookletsForExport.length < booklets.length}
+                  onChange={handleSelectAllBookletsForExport}
+                />
+              }
+              label="Select All"
+            />
+          </Box>
+
+          <Box sx={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+            <List dense>
+              {booklets.map((booklet) => (
+                <ListItem key={booklet.id} dense>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={selectedBookletsForExport.includes(booklet.id)}
+                        onChange={() => handleToggleBookletForExport(booklet.id)}
+                        size="small"
+                      />
+                    }
+                    label={booklet.name}
+                    sx={{ 
+                      m: 0,
+                      width: '100%',
+                      '& .MuiTypography-root': {
+                        fontSize: '0.9rem',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      },
+                    }}
+                  />
+                </ListItem>
+              ))}
+              {booklets.length === 0 && (
+                <ListItem>
+                  <Typography variant="body2" color="text.secondary">
+                    No booklets available
+                  </Typography>
+                </ListItem>
+              )}
+            </List>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBatchExportDialogOpen(false)}>Cancel</Button>
+          <Button 
+            onClick={handleBatchExport}
+            variant="contained"
+            disabled={selectedBookletsForExport.length === 0}
+            startIcon={<ArchiveIcon />}
+          >
+            Export Selected
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+
+  return (
+    <>
+      {isCompact ? renderCompactView() : renderFullView()}
+      {renderDialogs()}
+    </>
+  );
+}; 

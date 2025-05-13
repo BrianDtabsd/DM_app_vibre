@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>LM Studio Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+    textarea { width: 100%; height: 100px; margin-bottom: 10px; }
+    button { padding: 8px 16px; }
+    #result { margin-top: 20px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>LM Studio Simple Test</h1>
+  <textarea id="prompt" placeholder="Enter your prompt here...">What day is it today?</textarea>
+  <button id="submit">Send</button>
+  <div id="result"></div>
+
+  <script>
+    // Minimal script - uses very little memory
+    document.getElementById('submit').addEventListener('click', async () => {
+      const prompt = document.getElementById('prompt').value;
+      const resultDiv = document.getElementById('result');
+      
+      resultDiv.textContent = 'Loading...';
+      
+      try {
+        const response = await fetch('http://localhost:3001/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: [
+              { role: 'system', content: 'You are a helpful assistant.' },
+              { role: 'user', content: prompt }
+            ]
+          })
+        });
+        
+        const data = await response.json();
+        
+        if (data.error) {
+          resultDiv.textContent = `Error: ${data.error}`;
+        } else if (data.choices && data.choices.length > 0) {
+          resultDiv.textContent = data.choices[0].message.content;
+        } else {
+          resultDiv.textContent = 'No response content';
+        }
+      } catch (error) {
+        resultDiv.textContent = `Error: ${error.message}`;
+      }
+    });
+  </script>
+</body>
+</html> 

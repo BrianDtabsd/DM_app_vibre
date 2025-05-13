@@ -1,0 +1,87 @@
+import React from 'react';
+import { Box } from '@mui/material';
+import { List } from '../types';
+import ListNavigator from './ListNavigator';
+import ListContent from './ListContent';
+import { BookletManager } from './BookletManager';
+
+interface SplitLayoutProps {
+  lists: List[];
+  selectedList: List | null;
+  onListSelect: (list: List) => void;
+  onListUpdate: (list: List) => void;
+  onSaveBooklet: (list: List) => void;
+  onLoadBooklet: (list: List) => void;
+  onListDelete: (listId: string) => void;
+}
+
+const SplitLayout: React.FC<SplitLayoutProps> = ({
+  lists,
+  selectedList,
+  onListSelect,
+  onListUpdate,
+  onSaveBooklet,
+  onLoadBooklet,
+  onListDelete,
+}) => {
+  return (
+    <Box sx={{ 
+      display: 'flex', 
+      height: '100%',
+      gap: 2,
+      overflow: 'hidden'
+    }}>
+      {/* Left sidebar navigator */}
+      <Box
+        sx={{
+          width: '200px',
+          flexShrink: 0,
+          borderRight: 1,
+          borderColor: 'divider',
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <Box sx={{ flex: '0 0 auto', mb: 2 }}>
+          <ListNavigator
+            lists={lists}
+            selectedList={selectedList}
+            onListSelect={onListSelect}
+            onListDelete={onListDelete}
+          />
+        </Box>
+        <Box sx={{ 
+          flex: '1 1 auto',
+          borderTop: 1,
+          borderColor: 'divider',
+        }}>
+          <BookletManager 
+            onLoadBooklet={onLoadBooklet}
+            currentList={selectedList}
+            isCompact={true}
+          />
+        </Box>
+      </Box>
+
+      {/* Main content area */}
+      <Box sx={{ 
+        flexGrow: 1,
+        overflowY: 'auto',
+        bgcolor: 'background.default',
+        borderRadius: 1,
+        p: 2,
+      }}>
+        {selectedList && (
+          <ListContent
+            list={selectedList}
+            onUpdate={onListUpdate}
+            onSave={onSaveBooklet}
+          />
+        )}
+      </Box>
+    </Box>
+  );
+};
+
+export default SplitLayout; 
